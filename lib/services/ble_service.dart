@@ -10,6 +10,12 @@ class BleUuids {
   static const String settings   = '00002a6f-0000-1000-8000-00805f9b34fb'; // READ
   static const String command    = '00002a70-0000-1000-8000-00805f9b34fb'; // WRITE
 
+  /// OTA сервис
+  static const String otaService = 'fb1e4001-54ae-4a28-9f74-dfccb248601d';
+  static const String otaControl = 'fb1e4002-54ae-4a28-9f74-dfccb248601d'; // WRITE
+  static const String otaData    = 'fb1e4003-54ae-4a28-9f74-dfccb248601d'; // WRITE_NR
+  static const String otaStatus  = 'fb1e4004-54ae-4a28-9f74-dfccb248601d'; // NOTIFY
+
   /// Manufacturer data маркер для фильтрации наших устройств
   static const int manufacturerId = 0xFFFF;
   static const List<int> manufacturerMagic = [0x50, 0x53]; // 'PS'
@@ -27,8 +33,13 @@ class BleService {
   BluetoothCharacteristic? _statusChar;
   BluetoothCharacteristic? _settingsChar;
   BluetoothCharacteristic? _commandChar;
+  BluetoothCharacteristic? _otaCtrlChar;
+  BluetoothCharacteristic? _otaDataChar;
+  BluetoothCharacteristic? _otaStatusChar;
   StreamSubscription? _statusSub;
   StreamSubscription? _stateSub;
+
+  bool get hasOta => _otaCtrlChar != null && _otaDataChar != null && _otaStatusChar != null;
 
   final _connectionStateController = StreamController<BleConnectionState>.broadcast();
   final _statusController = StreamController<Map<String, dynamic>>.broadcast();
@@ -57,7 +68,6 @@ class BleService {
   }
 
   bool _isOurDevice(ScanResult r) {
-    // Проверяем manufacturer data если есть (после добавления в прошивку)
     final mfr = r.advertisementData.manufacturerData;
     if (mfr.containsKey(BleUuids.manufacturerId)) {
       final data = mfr[BleUuids.manufacturerId]!;
@@ -66,8 +76,7 @@ class BleService {
                data[1] == BleUuids.manufacturerMagic[1];
       }
     }
-    // Пока маркер не добавлен в прошивку — пропускаем все устройства с нашим сервисом
-    return true;
+    return false;
   }
 
   Future<void> stopScan() async {
@@ -117,6 +126,15 @@ class BleService {
           if (uuid == BleUuids.command  || uuid == '2a70') _commandChar  = char;
         }
       }
+      if (svcUuid == BleUuids.otaService) {
+        for (final char in svc.characteristics) {
+          final uuid = char.uuid.toString().toLowerCase();
+          if (uuid == BleUuids.otaControl) _otaCtrlChar   = char;
+          if (uuid == BleUuids.otaData)    _otaDataChar   = char;
+          if (uuid == BleUuids.otaStatus)  _otaStatusChar = char;
+        }
+        debugPrint('[BLE] OTA service found: ctrl=$_otaCtrlChar data=$_otaDataChar status=$_otaStatusChar');
+      }
     }
     debugPrint('[BLE] status=$_statusChar settings=$_settingsChar command=$_commandChar');
 
@@ -156,12 +174,37 @@ class BleService {
     _setState(BleConnectionState.disconnected);
   }
 
+  /// OTA методы
+  Stream<Map<String, dynamic>> otaStatusStream() {
+    if (_otaStatusChar == null) throw Exception('OTA недоступен');
+    return _otaStatusChar!.onValueReceived.map((data) =>
+        jsonDecode(utf8.decode(data)) as Map<String, dynamic>);
+  }
+
+  Future<void> otaSubscribeStatus() async {
+    if (_otaStatusChar == null) throw Exception('OTA недоступен');
+    await _otaStatusChar!.setNotifyValue(true);
+  }
+
+  Future<void> sendOtaCommand(Map<String, dynamic> cmd) async {
+    if (_otaCtrlChar == null) throw Exception('OTA недоступен');
+    await _otaCtrlChar!.write(utf8.encode(jsonEncode(cmd)));
+  }
+
+  Future<void> sendOtaChunk(List<int> data) async {
+    if (_otaDataChar == null) throw Exception('OTA недоступен');
+    await _otaDataChar!.write(data, withoutResponse: true);
+  }
+
   void _cleanup() {
     _statusSub?.cancel();
     _statusSub = null;
     _statusChar = null;
     _settingsChar = null;
     _commandChar = null;
+    _otaCtrlChar = null;
+    _otaDataChar = null;
+    _otaStatusChar = null;
   }
 
   void dispose() {

@@ -5,6 +5,7 @@ import '../services/ble_service.dart';
 import '../models/device_model.dart';
 import '../widgets/radar_widget.dart';
 import 'settings_screen.dart';
+import 'ota_screen.dart';
 
 class DeviceScreen extends StatefulWidget {
   final BluetoothDevice device;
@@ -153,6 +154,15 @@ class _DeviceScreenState extends State<DeviceScreen> {
                 child: Text('v${_status.fw}', style: const TextStyle(color: Colors.white38, fontSize: 12)),
               ),
             ),
+          // OTA обновление
+          IconButton(
+            icon: const Icon(Icons.system_update_outlined),
+            tooltip: 'Обновление прошивки',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => OtaScreen(status: _status)),
+            ),
+          ),
           // Настройки
           IconButton(
             icon: const Icon(Icons.settings),
